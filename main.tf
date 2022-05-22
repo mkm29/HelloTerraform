@@ -1,9 +1,9 @@
 # specify the provider (AWS)
 provider "aws" {
-  region                   = var.region
+  region                   = var.config.region
   shared_config_files      = ["~/.aws/config"]
   shared_credentials_files = ["~/.aws/credentials"]
-  profile                  = "k8s-admin"
+  profile                  = var.config.profile
 }
 
 # create a TLS key pair
@@ -14,7 +14,7 @@ resource "tls_private_key" "ec2_key" {
 
 # create a key pair on AWS from the TLS key pair
 resource "aws_key_pair" "ec2_key_pair" {
-  key_name   = var.key_name
+  key_name   = var.config.key_name
   public_key = tls_private_key.ec2_key.public_key_openssh
 }
 
@@ -47,7 +47,7 @@ resource "aws_subnet" "subnet_1" {
   vpc_id                  = aws_vpc.terraform_vpc.id
   cidr_block              = "10.0.1.0/24"
   map_public_ip_on_launch = true
-  availability_zone       = var.availability_zone
+  availability_zone       = var.config.availability_zone
   tags = {
     "Name" = "terraform-subnet-1"
   }
@@ -76,7 +76,7 @@ resource "aws_route_table_association" "rt_associate_subnet" {
 
 # create a security group to allow SSH access
 resource "aws_security_group" "ec2_sg" {
-  name        = var.sg_name
+  name        = var.config.sg_name
   description = "Security group to allow SSH from anwwhere"
   vpc_id      = aws_vpc.terraform_vpc.id
   # ingress rules
@@ -102,51 +102,40 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
-# create network interface
-resource "aws_network_interface" "web-server-nic" {
-  subnet_id       = aws_subnet.subnet_1.id
-  private_ips     = ["10.0.1.50"]
-  security_groups = [aws_security_group.ec2_sg.id]
-  description     = "Network interface for the web server"
-  tags = {
-    "Name" = "terraform-web-server-nic"
-  }
-  #   attachment {
-  #     instance     = aws_instance.web-server.id
-  #     device_index = 1
-  #   }
-}
-
 # create elastic ip
 resource "aws_eip" "web-server-eip" {
-  vpc                       = true
-  network_interface         = aws_network_interface.web-server-nic.id
-  associate_with_private_ip = "10.0.1.50"
+  vpc = true
+  # network_interface         = aws_instance.web-server.primary_network_interface.id
+  # associate_with_private_ip = "10.0.1.50"
   depends_on = [
     aws_internet_gateway.igw
   ]
+  tags = {
+    "Name" = "terraform-eip"
+  }
+}
+
+resource "aws_eip_association" "eip_assoc" {
+  instance_id   = aws_instance.web-server.id
+  allocation_id = aws_eip.web-server-eip.id
 }
 
 # create the EC2 instance
 resource "aws_instance" "web-server" {
   ami               = data.aws_ami.amzn2.id
-  instance_type     = "t2.micro"
-  availability_zone = var.availability_zone
+  instance_type     = var.config.instance_type
+  availability_zone = var.config.availability_zone
   key_name          = aws_key_pair.ec2_key_pair.key_name
-  network_interface {
-    device_index         = 0
-    network_interface_id = aws_network_interface.web-server-nic.id
-  }
   # specifiy security groups
   security_groups = [aws_security_group.ec2_sg.id]
   subnet_id       = aws_subnet.subnet_1.id
   # specify the elastic IP
-  associate_public_ip_address = aws_eip.web-server-eip.id
+  #   associate_public_ip_address = aws_eip.web-server-eip.id
   # define user_data
   user_data = <<EOF
 #!/bin/bash
 sudo yum update -y
-sudo yum install -y httpd24
+sudo yum install -y httpd
 sudo service httpd start
 sudo chkconfig httpd on
 sudo bash -c 'echo "<html><h1>Hello, Terraform!</h1></html>" > /var/www/html/index.html'
