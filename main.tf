@@ -132,14 +132,7 @@ resource "aws_instance" "web-server" {
   # specify the elastic IP
   #   associate_public_ip_address = aws_eip.web-server-eip.id
   # define user_data
-  user_data = <<EOF
-#!/bin/bash
-sudo yum update -y
-sudo yum install -y httpd
-sudo service httpd start
-sudo chkconfig httpd on
-sudo bash -c 'echo "<html><h1>Hello, Terraform!</h1></html>" > /var/www/html/index.html'
-EOF
+  user_data = file("setup_server.sh")
   tags = {
     Name = "HelloTerraform"
   }
